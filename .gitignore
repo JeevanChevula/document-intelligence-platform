@@ -1,0 +1,37 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Local file storage (documents uploaded during dev)
+storage/
+
+# Throwaway files used for manual testing
+sample_files/
+
+# Docker volumes data if ever bind-mounted locally
+pgdata/
+qdrant_storage/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local virtual environment
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Runtime logs from local dev servers
+*.log

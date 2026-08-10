@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+
+    env:
+      # dummy values — no real Groq/Postgres calls happen in the automated
+      # suite, but app.config.Settings requires these fields to be set
+      GROQ_API_KEY: dummy-key-for-ci
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+      JWT_SECRET_KEY: test-secret-key-for-ci
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install system dependencies (Tesseract, for OCR tests)
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
