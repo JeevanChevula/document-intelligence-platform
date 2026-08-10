@@ -8,8 +8,9 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Local file storage (documents uploaded during dev)
-storage/
+# Local file storage (documents uploaded during dev) — anchored to repo root
+# so it doesn't also match app/storage/, which is real source code
+/storage/
 
 # Throwaway files used for manual testing
 sample_files/
