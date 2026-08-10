@@ -311,3 +311,34 @@
 - Broaden test coverage as the frontend surfaces more real usage patterns
 - GitHub Actions CI (per the plan: added once core code exists — it now does)
 - AWS EC2 deployment, after billing alerts are set up first (per the original plan)
+
+## Session 18 — 2026-08-10
+
+### Built — git, GitHub, and CI actually stood up
+- Initialized the git repository for the first time (`git init`), confirmed `.gitignore` correctly excluded `.env`/`storage/`/`.venv`/logs, made the initial commit, created the `JeevanChevula/document-intelligence-platform` GitHub repo, and pushed.
+- Hit and fixed a real permission issue: the first push was rejected because the GitHub Personal Access Token in use lacked the `workflow` scope needed to push `.github/workflows/ci.yml`. Fixed by editing the existing token's scopes on GitHub (no need to regenerate the token or touch local credentials) rather than working around it.
+- **Found a genuine bug via CI itself, not local testing**: the very first GitHub Actions run failed on `ModuleNotFoundError: No module named 'app.storage'`. Root cause: `.gitignore`'s `storage/` rule (line 12, meant only for the top-level uploaded-files folder) matched *any* directory named `storage` anywhere in the repo, so it was silently also excluding `app/storage/` — real source code (`base.py`, `local.py`, `__init__.py`) that had never actually been committed. Fixed by anchoring the rule to the repo root (`/storage/`), then added and pushed the previously-missing files. This is exactly the kind of gap CI exists to catch — the code worked locally because the files were still sitting on disk uncommitted, so nothing local would have ever revealed this.
+- Second CI run passed cleanly (49 tests, real Qdrant service container, dummy config values) — first genuinely green run.
+- Added a lightweight **Adminer** service to `docker-compose.yml` (port 8081) — gives a browser-based table view for Postgres, mirroring Qdrant's own built-in dashboard (`localhost:6333/dashboard`), for inspecting stored documents/chat sessions/messages without writing SQL by hand.
+
+### Fixed — local dev environment stability
+- Diagnosed repeated Streamlit crashes during local testing: root cause was the laptop's total RAM (8GB) being nearly exhausted by Cursor + Chrome + Docker Desktop's GUI running simultaneously alongside the app — not a bug in the app itself. Mitigated by closing Docker Desktop's window (containers keep running headless) and reducing open browser tabs; a `.wslconfig` memory-limit increase was considered and correctly ruled out once Task Manager showed the *host* machine itself, not just WSL's allocation, was the actual bottleneck.
+
+### Built — AWS account and first EC2 instance
+- Created a new AWS account, deliberately selected the **Free Plan** (credits-based, services pause rather than charge once exhausted — not the Paid Plan) plus billing alerts, after working through the billing-safety questions in detail (a card is always required and can never be fully removed while the account is open, but Free Plan structurally prevents surprise charges).
+- Launched one EC2 instance: region **ap-south-2 (Hyderabad)** for low latency from India, **Ubuntu Server 26.04 LTS**, instance type **t3.small (2GB RAM)** — chosen over the default 1GB `t3.micro` given the exact memory-pressure lessons just learned locally, 8GB gp3 root volume.
+- Security group configured with three rules: SSH (port 22) restricted to the user's own IP only, plus two public rules (Custom TCP 8000 for the FastAPI backend, Custom TCP 8501 for Streamlit) open to `0.0.0.0/0` since recruiters/testers will connect from arbitrary networks.
+- Connected via SSH (key pair `docintel-key.pem`, copied from the Windows-side `/mnt/c/...` path into WSL's own filesystem first, since strict key permissions don't work reliably from the Windows-mounted path directly), installed Docker (`docker.io`, `docker-compose-v2`), enabled it, added the `ubuntu` user to the `docker` group, then rebooted to clear a pending post-upgrade restart flag. Verified `docker ps` runs without needing `sudo`.
+
+### Working
+- CI: green, 49 tests passing on GitHub Actions
+- EC2 instance: running, Docker installed and confirmed working
+- Paused deliberately before continuing — no containers started on the instance yet, so nothing needed stopping; instance itself should be stopped from the AWS console between sessions to conserve free-tier credits
+
+### Next
+- Resume on EC2: note its public IP will very likely change on next start (no Elastic IP reserved yet) — re-check it before reconnecting
+- Install Python + git on the instance, clone the GitHub repo onto it
+- Recreate `.env` there securely (not via git)
+- `docker compose up -d` for Postgres/Qdrant, then run the backend and Streamlit on the instance
+- Test the deployed app via the instance's public IP in a browser
+- Stop the instance when not actively testing/demoing
