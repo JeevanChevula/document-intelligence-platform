@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,6 +9,8 @@ from app.dependencies import get_current_user
 from app.graph import run_agent_pipeline
 from app.models import ChatSession, Message, User
 from app.schemas import ChatSessionCreate, ChatSessionOut, MessageCreate, MessageOut
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -81,7 +84,9 @@ def send_message(
         source = result["source"]
     except Exception:
         # never leave the user's question without a reply, even if the pipeline
-        # itself failed (Groq outage, rate limit, network error, etc.)
+        # itself failed (Groq outage, rate limit, network error, etc.) — but do
+        # log the real error, otherwise production failures are undiagnosable
+        logger.exception("Agent pipeline failed for session %s", session.id)
         answer = "Sorry, something went wrong while generating a response. Please try again."
         source = "error"
 
