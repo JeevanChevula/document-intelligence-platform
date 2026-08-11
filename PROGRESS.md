@@ -342,3 +342,46 @@
 - `docker compose up -d` for Postgres/Qdrant, then run the backend and Streamlit on the instance
 - Test the deployed app via the instance's public IP in a browser
 - Stop the instance when not actively testing/demoing
+
+## Session 19 — 2026-08-11
+
+### Deployed — first working EC2 deployment
+- SSH access failed on reconnect ("Connection timed out"): the security group's SSH rule was pinned to the IP address captured at launch, and the home ISP had since handed out a different one (dynamic IP). Fixed by re-selecting "My IP" on the inbound rule. Worth remembering — this recurs whenever the ISP reassigns, and only affects admin SSH, never the public app ports.
+- Installed git + Python on the instance, cloned the repo, recreated `.env` by hand via `nano` (never through git), `docker compose up -d` for Postgres/Qdrant/Adminer, `alembic upgrade head` for the schema, installed `tesseract-ocr` (a system package, so not covered by `requirements.txt`).
+- **Two real environment problems hit and fixed along the way:**
+  - Ubuntu 26.04 ships Python **3.14**, which has no prebuilt wheels yet for `psycopg2-binary`, `pillow`, or `grpcio-tools` — pip fell back to compiling each from source, failing on missing system libs and threatening a very long, memory-hungry `grpcio-tools` build on a 2GB box. Rather than patching package-by-package, installed **Python 3.13** (matching local and CI exactly) via the deadsnakes PPA and rebuilt the venv on it; everything then installed from wheels cleanly.
+  - `pip install` then failed with "Disk quota exceeded" — not the real disk (2.2G free) but `/tmp`, which is a RAM-backed `tmpfs` capped at 953M and left 76% full by the aborted source builds. Fixed by clearing it, purging pip's cache, and pointing `TMPDIR` at a directory on the roomy root disk.
+- Started both servers detached (`nohup ... & disown`), with Streamlit needing `--server.address 0.0.0.0` so it accepts connections from outside the instance rather than only from localhost. Verified reachable in a browser at the instance's public IP on ports 8000 and 8501.
+
+### Fixed — Router topic-bleed from conversation history
+- Real bug found by the user while testing the deployed app: after some casual chat about cricket, asking "list all career gaps" was answered about *cricketers'* career breaks, from the LLM's own knowledge, never touching the uploaded resume. Even an explicit correction ("no i'm asking about mine professional") stayed misrouted for another turn.
+- Root cause: the Router (added in Session 17) was being given conversation history, so an ambiguous question inherited its subject matter from whatever was recently discussed.
+- Fix: the Router now classifies from the **current message alone**. Checked the actual evidence before choosing this over the alternative (a more carefully worded prompt telling the Router to distinguish follow-ups from new topics): every case where memory genuinely matters — "what's my name?", "check that again" — is resolved in **Generation**, which keeps full history, not in the Router's retrieval-vs-general decision. So this removes the failure mechanism outright instead of asking the same component that just misjudged to make an even subtler judgment call. No memory capability was lost.
+
+### Fixed — retrieval was silently dropping the correct chunks
+- Second real bug from the same session: with two documents indexed (resume + blood report), questions about employment dates pulled chunks from the *blood report* and missed the resume's actual work-experience section entirely.
+- **Measured rather than guessed.** Ran the real queries against local Qdrant and read the actual scores: the correct resume chunk scored **0.455–0.526** for natural questions ("what are my employment dates"), while deliberately irrelevant control queries ("how do I fix my car engine", "chocolate cake recipe") scored **0.42–0.50** — i.e. an irrelevant query outscored a genuinely relevant one. **No value of `RETRIEVAL_SCORE_THRESHOLD` can separate these**; the ranges overlap. This is a limitation of `BAAI/bge-small-en-v1.5` at this corpus size, not a tuning mistake.
+- Fixes applied together:
+  - Removed `score_threshold` from `search_chunks()` entirely, and deleted the now-meaningless `RETRIEVAL_SCORE_THRESHOLD` setting from `config.py`/`.env`/`.env.example`. Relevance judgment now belongs to the LLM (Generation + Validator), which does it far better than cosine similarity at this scale.
+  - Widened `retrieve_relevant_chunks` limit 5 → 20. Evidence-driven: the chunk naming PiHex Labs ranked **11th–12th of only 14 total chunks** on the failing questions, so an intermediate limit of 10 (tried first) still cut it off and produced answers listing HCL but silently omitting PiHex.
+  - `_determine_source()` reworked: with no score filter, "chunks came back" no longer implies "chunks were relevant", so the `documents` vs `no_relevant_documents` label now also requires the Validator's `is_valid` verdict. Moved into `validation_node` since that's where the verdict exists.
+  - Tightened `GROUNDED_SYSTEM_PROMPT` to stop the model prefacing correct answers with hedges about the context "not looking like a complete resume" — that self-contradiction was tripping the Validator and mislabeling genuinely good answers.
+
+### Fixed — Groq free-tier rate limit hit during testing
+- The user spotted the Groq dashboard crossing its token rate limit right after the limit=20 change — a real cost consequence that should have been flagged upfront, since every question now sends far more context, twice (Generation and Validator).
+- Fix chosen deliberately over shrinking retrieval back down (which demonstrably broke correctness): cut `MAX_HISTORY_MESSAGES` **10 → 4**. Assistant answers are long, and replaying ten of them on *every* call — including questions that aren't follow-ups at all — was a larger share of tokens than the chunks were. 4 still covers genuine short-range follow-ups.
+- Confirmed on the dashboard afterwards: peak ~11.5K against the 12K limit, no longer exceeded.
+
+### Working
+- Full suite: `pytest tests/ -v` → **50 passed** (added tests for Router-without-history, source-labelling when the Validator rejects an answer, and history reaching Generation but not the Router; removed the score-threshold test for behaviour that no longer exists)
+- **Validated against fresh questions never used during tuning**, to check the fixes generalised rather than fitting one case: CGPA/college, a PiHex Labs summary, total IgE value vs reference range, and abnormal painkiller values — all four accurate and correctly labelled 📄 documents, across *both* uploaded PDFs. Casual greeting correctly routed to 🧠 general knowledge, with conversation memory visibly working at the new 4-message window.
+- A chocolate-cake question routing to general knowledge (rather than "no relevant documents") is correct behaviour, not a regression — it isn't a document-shaped question, and the 🧠 label makes its source honest and obvious.
+
+### Known limitation (deliberate, documented in code)
+- `limit=20` amounts to "retrieve everything" for a handful of personal documents (~14 chunks) and will not scale to hundreds of chunks — at that size it would retrieve a small fraction anyway and cost far more tokens. The real answer there is a stronger embedding model or a reranking step, not a larger number. Out of scope for this project's stated scope; left as an explicit, explainable tradeoff.
+
+### Next
+- Push this session's fixes to GitHub and redeploy on EC2 (the instance is still running the pre-fix code)
+- Stop the EC2 instance when not actively testing — it was left running overnight this session, quietly consuming free-tier credits
+- Consider an Elastic IP so the public address stops changing between stop/start cycles
+- Optional, previously deferred: `DELETE /documents/{id}` (and a single-document view) so duplicate test uploads can be cleaned up without going into Postgres/Qdrant directly

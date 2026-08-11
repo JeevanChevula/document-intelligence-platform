@@ -38,14 +38,3 @@ def test_retrieval_never_returns_another_users_chunks(indexed_test_data):
 
     returned_doc_ids = {r["document_id"] for r in results}
     assert str(indexed_test_data["doc_a"]) not in returned_doc_ids
-
-
-def test_search_filters_out_weak_matches_via_score_threshold(indexed_test_data):
-    # user_a's only document is about revenue; ask something with no real semantic
-    # connection to it — without a score_threshold, Qdrant would still return
-    # this as the "closest available" match even though it's not relevant
-    results = retrieve_relevant_chunks(
-        "What is the boiling point of water in Celsius?", indexed_test_data["user_a"]
-    )
-
-    assert results == []

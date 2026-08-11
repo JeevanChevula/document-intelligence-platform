@@ -53,6 +53,11 @@ def upsert_chunks(document_id: uuid.UUID, user_id: uuid.UUID, chunks: list[str])
 
 
 def search_chunks(query: str, user_id: uuid.UUID, limit: int = 5) -> list[dict]:
+    # deliberately no score_threshold: real testing showed cosine similarity from
+    # this embedding model doesn't cleanly separate relevant from irrelevant
+    # content (an irrelevant query scored higher than a genuinely relevant one) —
+    # so relevance judgment is left to the LLM in Generation/Validator instead,
+    # which understands meaning far better than a raw similarity cutoff can
     settings = get_settings()
     ensure_collection()
 
@@ -63,7 +68,6 @@ def search_chunks(query: str, user_id: uuid.UUID, limit: int = 5) -> list[dict]:
         query=query_vector,
         query_filter=Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=str(user_id)))]),
         limit=limit,
-        score_threshold=settings.retrieval_score_threshold,
     )
 
     return [

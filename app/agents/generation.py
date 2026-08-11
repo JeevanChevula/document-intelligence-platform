@@ -2,8 +2,11 @@ from app.llm import get_completion
 
 GROUNDED_SYSTEM_PROMPT = (
     "You are a helpful assistant that answers questions using ONLY the provided context from the "
-    "user's documents. If the answer is not contained in the context, say you don't have enough "
-    "information rather than guessing."
+    "user's documents. The context may be a mix of excerpts from several different documents — "
+    "don't comment on whether it looks like a complete or typical document of any particular kind; "
+    "just directly use whatever relevant details are actually present to answer the question. "
+    "If the answer is genuinely not contained anywhere in the context, say so briefly and directly, "
+    "without guessing."
 )
 
 GENERAL_SYSTEM_PROMPT = "You are a friendly, helpful assistant having a normal conversation. Respond naturally."

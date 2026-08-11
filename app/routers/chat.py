@@ -11,9 +11,12 @@ from app.schemas import ChatSessionCreate, ChatSessionOut, MessageCreate, Messag
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# how many prior turns to feed back to the LLM as conversation memory; capped to
-# keep prompt size (and Groq token usage) bounded as sessions grow long
-MAX_HISTORY_MESSAGES = 10
+# how many prior turns to feed back to the LLM as conversation memory. Kept small
+# deliberately: assistant answers are long, so replaying many of them on every
+# single call was a large share of token usage (enough to hit Groq's free-tier
+# rate limit during testing) while only genuinely mattering for short-range
+# follow-ups like "check that again".
+MAX_HISTORY_MESSAGES = 4
 
 
 def _get_owned_session(session_id: uuid.UUID, db: Session, current_user: User) -> ChatSession:

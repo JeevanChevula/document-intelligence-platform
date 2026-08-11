@@ -25,10 +25,11 @@ def test_route_query_uses_zero_temperature_for_consistent_decisions():
     assert mock_completion.call_args.kwargs["temperature"] == 0.0
 
 
-def test_route_query_passes_history_through_for_context_dependent_followups():
-    history = [{"role": "user", "content": "What was our Q3 revenue?"}, {"role": "assistant", "content": "15%."}]
-
+def test_route_query_does_not_use_conversation_history():
+    # deliberate: history previously caused topic-bleed (unrelated recent chat
+    # biasing the classification of an unrelated new question) — the Router
+    # now classifies from the current message alone
     with patch("app.agents.router.get_completion", return_value="retrieval") as mock_completion:
-        route_query("check that again", history)
+        route_query("list all career gaps")
 
-    assert mock_completion.call_args.kwargs["history"] == history
+    assert "history" not in mock_completion.call_args.kwargs

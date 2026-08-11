@@ -23,7 +23,6 @@ class Settings(BaseSettings):
     qdrant_collection_name: str = "document_chunks"
     embedding_model_name: str = "BAAI/bge-small-en-v1.5"
     embedding_dimension: int = 384
-    retrieval_score_threshold: float = 0.5
 
     # Auth
     jwt_secret_key: str
