@@ -380,8 +380,29 @@
 ### Known limitation (deliberate, documented in code)
 - `limit=20` amounts to "retrieve everything" for a handful of personal documents (~14 chunks) and will not scale to hundreds of chunks — at that size it would retrieve a small fraction anyway and cost far more tokens. The real answer there is a stronger embedding model or a reranking step, not a larger number. Out of scope for this project's stated scope; left as an explicit, explainable tradeoff.
 
+### Deployed and verified end-to-end
+- Pushed the fixes, CI passed, pulled onto EC2 and restarted both servers (no new dependencies or migrations this round, so `git pull` + restart was enough).
+- Verified on the **deployed** app at the instance's public IP — CGPA/college, the PiHex Labs summary and the IgE value all answered correctly there, confirming the fixes work in the real deployment and not just locally. Note the EC2 instance has its own Postgres/Qdrant, so the account and PDFs had to be created there separately from local.
+
+### Fixed — production errors were undiagnosable
+- Deployed testing then started failing on document questions with the generic "Sorry, something went wrong" message, while general chat kept working. The server log showed only `201 Created` for those requests — nothing else.
+- Root cause of the *blindness*: `send_message`'s `except Exception` (added in Session 14) caught the failure and returned the friendly message without ever logging the real error. Good for the user, useless for debugging — a genuine gap in production error handling.
+- Fixed by adding `logger.exception(...)` in that handler. Deployed it, reproduced the failure, and the real error appeared immediately.
+
+### Root cause found — Groq's daily token limit, not the per-minute rate
+- The actual error: `groq.RateLimitError: 429 ... tokens per day (TPD): Limit 100000, Used 96602, Requested 3627`.
+- **The limit that bites is per-day, not per-minute.** Both of us had been watching the dashboard's per-minute token graph; the real ceiling is 100K tokens/day, and this session's heavy iteration had consumed ~96.6K of it. This explains the two confusing symptoms exactly: waiting a minute never helped (wrong window), and general chat kept working while document questions failed (a few hundred tokens still fit in the ~3.4K remaining, but a document question needs ~3.6K).
+- Not a bug in the app — the app behaved correctly throughout. But it exposes a real capacity constraint: at ~3,600 tokens per document question (up to 20 chunks sent through **two** LLM calls, Generation *and* Validator), the free tier allows roughly **27 document questions per day** across all users of the demo.
+
+### Considered and deliberately deferred — splitting Router/Validator onto a smaller model
+- Groq's rate limits are scoped per model (visible in the error text), so moving the Router (outputs one word: `retrieval`/`general`) and the Validator (outputs `YES`/`NO`) onto a small fast model would free the whole 70B daily budget for Generation, where answer quality actually matters, and roughly halve the 70B cost per document question.
+- Decided **not** to implement it now. The daily budget was exhausted by development iteration, not realistic usage — a recruiter asking ~10 questions costs ~36K, so normal demo traffic fits comfortably. The honest framing for anyone who asks is simply: this demo runs on Groq's free tier, capped at 100K tokens/day; a paid tier removes that ceiling.
+- Worth revisiting if the demo ever sees several users in one day, or as a small, easy engineering win (one extra config setting, two call sites).
+
 ### Next
-- Push this session's fixes to GitHub and redeploy on EC2 (the instance is still running the pre-fix code)
-- Stop the EC2 instance when not actively testing — it was left running overnight this session, quietly consuming free-tier credits
+- Stop the EC2 instance when not actively testing — it was left running overnight again this session, quietly consuming free-tier credits
+- Further deployed testing has to wait for the daily Groq quota to recover
 - Consider an Elastic IP so the public address stops changing between stop/start cycles
 - Optional, previously deferred: `DELETE /documents/{id}` (and a single-document view) so duplicate test uploads can be cleaned up without going into Postgres/Qdrant directly
+- Optional: the Router/Validator small-model split described above
+- Tidy the leftover `RETRIEVAL_SCORE_THRESHOLD` line from the EC2 instance's `.env` (harmless — unknown settings are ignored — but it no longer means anything)
