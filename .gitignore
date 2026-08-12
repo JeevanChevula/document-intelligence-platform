@@ -36,3 +36,6 @@ htmlcov/
 
 # Runtime logs from local dev servers
 *.log
+
+# Private working log — session-by-session build notes, kept local
+PROGRESS.md
