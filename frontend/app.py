@@ -11,15 +11,9 @@ from api_client import (
     send_message,
     upload_document,
 )
+from labels import source_caption
 
 st.set_page_config(page_title="Document Intelligence Platform", layout="wide")
-
-SOURCE_LABELS = {
-    "documents": "📄 From your documents",
-    "general_knowledge": "🧠 General knowledge",
-    "no_relevant_documents": "⚠️ No relevant documents found",
-    "error": "❌ Error generating response",
-}
 
 
 def _init_session_state() -> None:
@@ -145,7 +139,7 @@ def _chat_tab(token: str) -> None:
         with st.chat_message(message["role"]):
             st.write(message["content"])
             if message["role"] == "assistant" and message.get("source"):
-                st.caption(SOURCE_LABELS.get(message["source"], message["source"]))
+                st.caption(source_caption(message))
 
     prompt = st.chat_input("Ask a question about your documents, or just say hi")
     if prompt:

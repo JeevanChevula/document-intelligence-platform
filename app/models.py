@@ -43,8 +43,15 @@ class Message(Base):
     session_id = Column(UUID(as_uuid=True), ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String, nullable=False)  # "user" | "assistant" | "system"
     content = Column(Text, nullable=False)
-    # only set for assistant messages: "documents" | "general_knowledge" | "no_relevant_documents" | "error"
+    # where the answer came from — provenance only, independent of whether it
+    # checked out: "documents" | "general_knowledge" | "no_relevant_documents" | "error"
     source = Column(String, nullable=True)
+    # whether the Validator could confirm the answer against the retrieved chunks.
+    # Deliberately separate from `source`: an advisory question ("what roles should
+    # I apply for based on my resume?") legitimately extrapolates beyond the
+    # documents, so it can be genuinely document-grounded *and* unverified at once.
+    # NULL where validation doesn't apply (user messages, general chat, errors).
+    is_verified = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     session = relationship("ChatSession", back_populates="messages")

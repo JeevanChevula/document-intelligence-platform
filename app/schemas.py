@@ -58,6 +58,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     source: str | None
+    is_verified: bool | None
     created_at: datetime
 
     class Config:

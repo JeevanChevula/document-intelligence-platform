@@ -82,6 +82,9 @@ def send_message(
         result = run_agent_pipeline(message_in.content, current_user.id, history)
         answer = result["answer"]
         source = result["source"]
+        # only meaningful when there were chunks to validate against; stays NULL
+        # for general chat and for document questions that retrieved nothing
+        is_verified = result["is_valid"] if source == "documents" else None
     except Exception:
         # never leave the user's question without a reply, even if the pipeline
         # itself failed (Groq outage, rate limit, network error, etc.) — but do
@@ -89,8 +92,11 @@ def send_message(
         logger.exception("Agent pipeline failed for session %s", session.id)
         answer = "Sorry, something went wrong while generating a response. Please try again."
         source = "error"
+        is_verified = None
 
-    assistant_message = Message(session_id=session.id, role="assistant", content=answer, source=source)
+    assistant_message = Message(
+        session_id=session.id, role="assistant", content=answer, source=source, is_verified=is_verified
+    )
     db.add(assistant_message)
     db.commit()
     db.refresh(assistant_message)

@@ -5,24 +5,16 @@ from app.graph import _determine_source, run_agent_pipeline
 
 
 def test_determine_source_general_route():
-    assert _determine_source("general", [], True) == "general_knowledge"
+    assert _determine_source("general", []) == "general_knowledge"
 
 
-def test_determine_source_retrieval_with_chunks_and_valid_answer():
+def test_determine_source_retrieval_with_chunks():
     chunks = [{"text": "some chunk"}]
-    assert _determine_source("retrieval", chunks, True) == "documents"
+    assert _determine_source("retrieval", chunks) == "documents"
 
 
 def test_determine_source_retrieval_with_no_chunks():
-    assert _determine_source("retrieval", [], True) == "no_relevant_documents"
-
-
-def test_determine_source_retrieval_with_chunks_but_invalid_answer():
-    # chunks came back (retrieval no longer filters by score), but the Validator
-    # couldn't confirm the answer was actually grounded in them — treated the
-    # same as finding nothing useful, since the user shouldn't trust it either way
-    chunks = [{"text": "some unrelated chunk"}]
-    assert _determine_source("retrieval", chunks, False) == "no_relevant_documents"
+    assert _determine_source("retrieval", []) == "no_relevant_documents"
 
 
 def test_general_query_skips_retrieval_node():
@@ -103,21 +95,22 @@ def test_retrieval_query_with_no_matching_chunks_has_correct_source():
     assert result["source"] == "no_relevant_documents"
 
 
-def test_retrieval_query_with_chunks_but_failed_validation_has_correct_source():
-    # e.g. an irrelevant query that still happened to return some low-similarity
-    # chunks (retrieval no longer filters by score) — the Validator catching that
-    # the answer isn't actually grounded is what correctly labels this, not
-    # whether any chunks came back at all
-    fake_chunks = [{"text": "unrelated chunk", "document_id": "abc", "chunk_index": 0, "score": 0.45}]
-    fallback_answer = "I couldn't confidently verify this answer against your documents: some guess."
+def test_failed_validation_does_not_change_where_the_answer_came_from():
+    # the regression this guards: an advisory question ("what roles should I apply
+    # for based on my resume?") legitimately extrapolates beyond the documents, so
+    # the Validator rejects it — but it genuinely *did* come from the user's
+    # documents, and was previously mislabelled "no_relevant_documents"
+    fake_chunks = [{"text": "resume chunk", "document_id": "abc", "chunk_index": 0, "score": 0.5}]
+    fallback_answer = "I couldn't confidently verify this answer against your documents: apply for X."
 
     with (
         patch("app.graph.route_query", return_value="retrieval"),
         patch("app.graph.retrieve_relevant_chunks", return_value=fake_chunks),
-        patch("app.graph.generate_answer", return_value="some guess."),
+        patch("app.graph.generate_answer", return_value="apply for X."),
         patch("app.graph.validate_answer", return_value=(False, fallback_answer)),
     ):
-        result = run_agent_pipeline("some irrelevant question", uuid.uuid4())
+        result = run_agent_pipeline("what roles should I apply for?", uuid.uuid4())
 
+    # provenance and verification are reported independently
+    assert result["source"] == "documents"
     assert result["is_valid"] is False
-    assert result["source"] == "no_relevant_documents"

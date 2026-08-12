@@ -13,10 +13,16 @@ Built and deployed end-to-end: FastAPI backend, LangGraph agent pipeline, Qdrant
 
    | Label | Meaning |
    |---|---|
-   | 📄 From your documents | Grounded in your uploaded content, and the Validator confirmed it |
+   | 📄 From your documents | Answered using your uploaded content |
    | 🧠 General knowledge | Answered from the model's own knowledge — not from your files |
-   | ⚠️ No relevant documents found | The question was document-shaped, but nothing usable was found |
+   | ⚠️ No relevant documents found | The question was document-shaped, but nothing was retrieved |
    | ❌ Error | The pipeline failed (LLM outage, rate limit) — your question is still saved |
+
+   Verification is reported *separately* from provenance: a document-grounded answer the
+   Validator couldn't confirm is shown as 📄 with an added "parts not verified" note, rather
+   than being demoted to "no relevant documents". The two are genuinely different questions —
+   an advisory question ("what roles should I apply for based on my resume?") legitimately
+   extrapolates beyond the source while still being grounded in it.
 
 ## Architecture
 

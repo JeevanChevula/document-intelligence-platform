@@ -39,3 +39,8 @@ htmlcov/
 
 # Private working log — session-by-session build notes, kept local
 PROGRESS.md
+
+# Personal reference material, kept local. Deliberately the specific files rather
+# than /docs/, so a future public docs folder isn't silently swallowed.
+docs/how-it-works.html
+docs/interview-guide.html
