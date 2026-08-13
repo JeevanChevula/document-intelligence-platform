@@ -4,6 +4,16 @@ A multi-agent RAG system for question-answering over PDF documents — both sear
 
 Built and deployed end-to-end: FastAPI backend, LangGraph agent pipeline, Qdrant vector search, PostgreSQL, Streamlit frontend, Docker Compose, GitHub Actions CI, running on AWS EC2.
 
+## Live demo
+
+🔗 **http://98.130.133.25:8501**
+
+Register an account, upload a PDF, and ask questions about it.
+
+> Served over plain HTTP, so please **don't reuse a real password** — anything you type is
+> sent unencrypted. It runs on a free-tier LLM capped at 100K tokens/day, so answers may
+> occasionally fail once that's exhausted.
+
 ## What it does
 
 1. **Register / log in** — JWT authentication; every user only ever sees their own documents and chats.
@@ -130,6 +140,8 @@ Deployed on an **AWS EC2** `t3.small` instance (Ubuntu, ap-south-2), provisioned
 
 The instance runs the same stack as local development: Docker Compose for Postgres and Qdrant, with the FastAPI backend and Streamlit frontend running directly on the host. Its security group exposes ports `8000` and `8501` publicly, while SSH (`22`) is restricted to a single administrative IP.
 
+An **Elastic IP** is attached so the public address survives stop/start cycles — an auto-assigned address is only stable while the instance keeps running, which would have made the demo link above go stale.
+
 ```bash
 # On the instance
 git pull
@@ -169,4 +181,4 @@ Deliberate boundaries, chosen to keep the project focused:
 - **LLM rate limits.** Runs on Groq's free tier (100K tokens/day). Each document question costs roughly 3,600 tokens across the Generation and Validator calls, so sustained heavy use can exhaust the daily budget; a paid tier removes the ceiling.
 - **Retrieval doesn't scale to large corpora.** The retrieve-generously strategy described above is right for a handful of documents per user, but would need a reranking step at much larger scale.
 - **Documents can't be deleted through the API** yet — uploads are currently add-only.
-- **No HTTPS.** The deployment serves plain HTTP on its EC2 public IP.
+- **No HTTPS.** The deployment serves plain HTTP on its EC2 public IP, so credentials travel unencrypted. Fixing it properly means a domain name and a TLS certificate, since certificates aren't issued for bare IP addresses.
