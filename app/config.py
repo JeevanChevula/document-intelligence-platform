@@ -8,7 +8,10 @@ class Settings(BaseSettings):
 
     # LLM (Groq)
     groq_api_key: str
-    groq_model: str = "llama-3.3-70b-versatile"
+    # llama-3.3-70b-versatile was retired by Groq on 2026-08-16. gpt-oss-120b is the
+    # closest replacement on the free tier and doubles the daily token budget
+    # (100K -> 200K TPD), at the cost of a slightly tighter per-minute ceiling (12K -> 8K TPM).
+    groq_model: str = "openai/gpt-oss-120b"
 
     # PostgreSQL
     postgres_user: str

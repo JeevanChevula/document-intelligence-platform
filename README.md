@@ -11,7 +11,7 @@ Built and deployed end-to-end: FastAPI backend, LangGraph agent pipeline, Qdrant
 Register an account, upload a PDF, and ask questions about it.
 
 > Served over plain HTTP, so please **don't reuse a real password** — anything you type is
-> sent unencrypted. It runs on a free-tier LLM capped at 100K tokens/day, so answers may
+> sent unencrypted. It runs on a free-tier LLM capped at 200K tokens/day, so answers may
 > occasionally fail once that's exhausted.
 
 ## What it does
@@ -59,6 +59,8 @@ Router ───┤                                     ├─▶ Generation ─
 - **Generation** — answers strictly from the retrieved context on the `retrieval` path, or converses normally on the `general` path. Receives recent conversation history, so follow-ups like "check that again" work.
 - **Validator** — an independent second LLM call ("LLM-as-judge") that fact-checks the generated answer against the same retrieved chunks. If it can't confirm the answer is grounded, the answer is returned with an explicit disclaimer rather than presented as fact.
 
+All four agents share a single model. Splitting the cheap Router onto a smaller model would spread load across two independent rate-limit budgets, but measured traffic at this scale never approaches those limits — so the split would add a config knob and a failure mode to solve a problem that doesn't exist yet.
+
 ### Retrieval design
 
 Retrieval deliberately does **not** filter by a similarity-score threshold. Measured on real data with this embedding model, cosine similarity did not separate relevant from irrelevant content: an unrelated control query scored `0.495` while a genuinely relevant chunk scored `0.455`. No threshold value can split those. Instead the pipeline retrieves generously (top 20) and lets the LLM do relevance judgement in Generation and Validator, which it does far better at this scale.
@@ -72,7 +74,7 @@ This suits the project's scope — a handful of personal documents per user. At 
 | Frontend | Streamlit | Chosen over React to keep focus on backend/AI engineering |
 | Backend | FastAPI + Pydantic | JWT auth (python-jose), bcrypt password hashing |
 | Agents | LangGraph | `StateGraph` with a conditional edge on the Router's decision |
-| LLM | Groq — `llama-3.3-70b-versatile` | Configurable via `GROQ_MODEL` |
+| LLM | Groq — `openai/gpt-oss-120b` | Configurable via `GROQ_MODEL` |
 | Embeddings | fastembed — `BAAI/bge-small-en-v1.5` (384-dim) | ONNX-based; chosen over PyTorch-based alternatives to keep the dependency footprint small |
 | Vector store | Qdrant | Cosine distance, server-side `user_id` filtering |
 | Database | PostgreSQL + SQLAlchemy + Alembic | Versioned schema migrations |
@@ -178,7 +180,7 @@ Deliberate boundaries, chosen to keep the project focused:
 
 ## Known limitations
 
-- **LLM rate limits.** Runs on Groq's free tier (100K tokens/day). Each document question costs roughly 3,600 tokens across the Generation and Validator calls, so sustained heavy use can exhaust the daily budget; a paid tier removes the ceiling.
+- **LLM rate limits.** Runs on Groq's free tier: 200K tokens/day and 8K tokens/minute. A document question costs roughly 3,600 tokens, because Generation and the Validator each read the retrieved chunks. Sustained use can exhaust the daily budget, and a question against a large document — where all 20 retrieved chunks come back full — can approach the per-minute ceiling. A paid tier removes both; short of that, the lever is sending the Validator a trimmed chunk set rather than the full one.
 - **Retrieval doesn't scale to large corpora.** The retrieve-generously strategy described above is right for a handful of documents per user, but would need a reranking step at much larger scale.
 - **Documents can't be deleted through the API** yet — uploads are currently add-only.
 - **No HTTPS.** The deployment serves plain HTTP on its EC2 public IP, so credentials travel unencrypted. Fixing it properly means a domain name and a TLS certificate, since certificates aren't issued for bare IP addresses.
