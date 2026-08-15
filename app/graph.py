@@ -14,6 +14,10 @@ class GraphState(TypedDict):
     query: str
     user_id: str
     history: list[dict]
+    # filenames the user owns, passed in by the caller so this module stays free
+    # of any database dependency — the Router uses them to route on phrasing it
+    # would otherwise misread
+    document_names: list[str]
     route: str
     chunks: list[dict]
     answer: str
@@ -22,7 +26,7 @@ class GraphState(TypedDict):
 
 
 def router_node(state: GraphState) -> dict:
-    return {"route": route_query(state["query"])}
+    return {"route": route_query(state["query"], state.get("document_names", []))}
 
 
 def retrieval_node(state: GraphState) -> dict:
@@ -81,11 +85,17 @@ def get_graph():
     return graph.compile()
 
 
-def run_agent_pipeline(query: str, user_id: uuid.UUID, history: list[dict] | None = None) -> GraphState:
+def run_agent_pipeline(
+    query: str,
+    user_id: uuid.UUID,
+    history: list[dict] | None = None,
+    document_names: list[str] | None = None,
+) -> GraphState:
     initial_state: GraphState = {
         "query": query,
         "user_id": str(user_id),
         "history": history or [],
+        "document_names": document_names or [],
         "route": "",
         "chunks": [],
         "answer": "",

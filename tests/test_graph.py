@@ -68,7 +68,7 @@ def test_history_reaches_generation_but_not_router():
     # deliberate: the Router classifies from the current message alone (history
     # previously caused topic-bleed from unrelated recent chat); Generation still
     # gets full history, since that's where conversational memory actually matters
-    mock_route.assert_called_once_with("What is my name?")
+    mock_route.assert_called_once_with("What is my name?", [])
     mock_generate.assert_called_once_with("What is my name?", [], "general", history)
 
 
@@ -80,7 +80,7 @@ def test_no_history_defaults_to_empty_list():
     ):
         run_agent_pipeline("Hello!", uuid.uuid4())
 
-    mock_route.assert_called_once_with("Hello!")
+    mock_route.assert_called_once_with("Hello!", [])
 
 
 def test_retrieval_query_with_no_matching_chunks_has_correct_source():

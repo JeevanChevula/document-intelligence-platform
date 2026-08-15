@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.graph import run_agent_pipeline
-from app.models import ChatSession, Message, User
+from app.models import ChatSession, DocumentMetadata, Message, User
 from app.schemas import ChatSessionCreate, ChatSessionOut, MessageCreate, MessageOut
 
 logger = logging.getLogger(__name__)
@@ -104,8 +104,14 @@ def send_message(
     db.add(user_message)
     db.commit()
 
+    # fetched here rather than inside the pipeline so app/graph.py keeps no
+    # database dependency of its own — same pattern as `history` above
+    document_names = [
+        name for (name,) in db.query(DocumentMetadata.filename).filter(DocumentMetadata.user_id == current_user.id)
+    ]
+
     try:
-        result = run_agent_pipeline(message_in.content, current_user.id, history)
+        result = run_agent_pipeline(message_in.content, current_user.id, history, document_names)
         answer = result["answer"]
         source = result["source"]
         # only meaningful when there were chunks to validate against; stays NULL

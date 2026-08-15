@@ -54,7 +54,7 @@ Router ───┤                                     ├─▶ Generation ─
           └─▶ retrieval ─▶ Retrieval agent ─────┘
 ```
 
-- **Router** — classifies the message as `retrieval` (needs the user's documents) or `general` (greeting, small talk, unrelated question). Runs at `temperature=0.0`, and deliberately sees **only the current message** — feeding it conversation history caused unrelated recent chat to bias its classification.
+- **Router** — classifies the message as `retrieval` (needs the user's documents) or `general` (greeting, small talk, unrelated question). Runs at `temperature=0.0`, and deliberately sees **only the current message** — feeding it conversation history caused unrelated recent chat to bias its classification. It *is* given the user's document **filenames** (never their contents, so the cost is a few tokens): judging a sentence in a vacuum proved fragile to phrasing, where a one-character typo — "validity **or** my driving license" — routed to general despite the user owning `Driving licence.pdf`. The filenames supply the context a human reader would have had, while "how long are driving licences valid in the UK?" still correctly routes to general.
 - **Retrieval** — embeds the question and searches Qdrant, filtered server-side by `user_id` so one user's query can never touch another user's chunks.
 - **Generation** — answers strictly from the retrieved context on the `retrieval` path, or converses normally on the `general` path. Receives recent conversation history, so follow-ups like "check that again" work.
 - **Validator** — an independent second LLM call ("LLM-as-judge") that fact-checks the generated answer against the same retrieved chunks. If it can't confirm the answer is grounded, the answer is returned with an explicit disclaimer rather than presented as fact.
@@ -82,7 +82,7 @@ This suits the project's scope — a handful of personal documents per user. At 
 | OCR | Tesseract (pytesseract) | Pages rendered at 300 DPI before OCR |
 | File storage | Local disk behind an abstraction | Swappable to S3 without touching business logic |
 | Infra | Docker Compose | Postgres, Qdrant, Adminer |
-| Tests | pytest | 61 tests; LLM calls mocked so the suite never spends API quota |
+| Tests | pytest | 66 tests; LLM calls mocked so the suite never spends API quota |
 | CI | GitHub Actions | Runs the full suite against a real Qdrant service container |
 
 ## API
@@ -162,7 +162,7 @@ Secrets are never committed — `.env` is recreated directly on the instance.
 pytest tests/ -v
 ```
 
-61 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, document deletion across all three data stores, and the full graph wiring.
+66 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, document deletion across all three data stores, and the full graph wiring.
 
 Two deliberate testing decisions:
 
