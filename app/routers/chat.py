@@ -21,6 +21,26 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # follow-ups like "check that again".
 MAX_HISTORY_MESSAGES = 4
 
+# how much of the first message becomes the chat's title
+TITLE_MAX_LENGTH = 50
+
+
+def _title_from(message: str) -> str:
+    """Derive a chat title from its first message.
+
+    Deliberately not an LLM call: a summarised title would cost tokens on every
+    new chat against a limited daily budget, and the user's own opening words
+    identify the conversation perfectly well. Untitled chats all rendered as
+    "Untitled chat", which made the session list unusable once there were a few.
+    """
+    title = " ".join(message.split())  # collapse newlines/runs of spaces
+    if len(title) <= TITLE_MAX_LENGTH:
+        return title
+    # trim at a word boundary where there is one reasonably near the end,
+    # so titles don't break mid-word
+    trimmed = title[:TITLE_MAX_LENGTH].rsplit(" ", 1)[0]
+    return f"{trimmed or title[:TITLE_MAX_LENGTH]}…"
+
 
 def _get_owned_session(session_id: uuid.UUID, db: Session, current_user: User) -> ChatSession:
     session = (
@@ -73,6 +93,12 @@ def send_message(
         .all()
     )
     history = [{"role": m.role, "content": m.content} for m in reversed(prior_messages)]
+
+    # name the chat after its opening message. Guarded on the session having no
+    # title rather than on the history being empty, so an explicitly-chosen title
+    # is never overwritten and a chat whose first turn errored still gets named.
+    if not session.title:
+        session.title = _title_from(message_in.content)
 
     user_message = Message(session_id=session.id, role="user", content=message_in.content)
     db.add(user_message)

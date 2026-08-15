@@ -54,6 +54,11 @@ def upload_document(token: str, filename: str, file_bytes: bytes) -> dict:
     return response.json()
 
 
+def delete_document(token: str, document_id: str) -> None:
+    response = requests.delete(f"{API_BASE_URL}/documents/{document_id}", headers=_auth_headers(token))
+    _raise_for_status(response)
+
+
 def list_sessions(token: str) -> list[dict]:
     response = requests.get(f"{API_BASE_URL}/chat/sessions", headers=_auth_headers(token))
     _raise_for_status(response)

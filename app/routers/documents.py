@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
@@ -13,7 +14,9 @@ from app.ocr import run_ocr
 from app.schemas import DocumentOut
 from app.storage import get_storage
 from app.validation import is_valid_pdf
-from app.vector_store import upsert_chunks
+from app.vector_store import delete_document_chunks, upsert_chunks
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -26,6 +29,53 @@ def list_documents(db: Session = Depends(get_db), current_user: User = Depends(g
         .order_by(DocumentMetadata.uploaded_at.desc())
         .all()
     )
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a document from all three places it lives: Qdrant, disk, Postgres.
+
+    Ordering is deliberate. Chunks go first, because the worst possible outcome
+    is a document that looks deleted but still feeds answers into the RAG
+    pipeline — invisible and still active. Removing chunks first means a partial
+    failure leaves the document *visible but inert*: the user can see it in their
+    list and retry. Fail toward the state the user can observe and fix.
+
+    404 rather than 403 for someone else's document, matching the chat router:
+    the API never reveals whether a resource it won't serve exists.
+    """
+    document = (
+        db.query(DocumentMetadata)
+        .filter(DocumentMetadata.id == document_id, DocumentMetadata.user_id == current_user.id)
+        .first()
+    )
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    try:
+        delete_document_chunks(document_id, current_user.id)
+    except Exception:
+        # the one failure worth refusing on: leaving searchable chunks behind
+        # would mean a "deleted" document silently keeps answering questions
+        logger.exception("Could not delete chunks for document %s", document_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not delete the document's indexed content — nothing was deleted. Please try again.",
+        )
+
+    try:
+        get_storage().delete(document.storage_path)
+    except Exception:
+        # an orphaned file wastes disk but can't affect any answer, so it must
+        # not block removing the row the user actually asked to be rid of
+        logger.exception("Could not delete stored file for document %s", document_id)
+
+    db.delete(document)
+    db.commit()
 
 
 @router.post("/upload", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)

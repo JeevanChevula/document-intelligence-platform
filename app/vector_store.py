@@ -52,6 +52,27 @@ def upsert_chunks(document_id: uuid.UUID, user_id: uuid.UUID, chunks: list[str])
     return len(points)
 
 
+def delete_document_chunks(document_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Remove every chunk belonging to one document.
+
+    Filters on user_id as well as document_id for the same reason search_chunks
+    does: the caller's document id is never trusted on its own, so even a
+    mismatched id can only ever delete the caller's own data.
+    """
+    settings = get_settings()
+    ensure_collection()
+
+    get_qdrant_client().delete(
+        collection_name=settings.qdrant_collection_name,
+        points_selector=Filter(
+            must=[
+                FieldCondition(key="document_id", match=MatchValue(value=str(document_id))),
+                FieldCondition(key="user_id", match=MatchValue(value=str(user_id))),
+            ]
+        ),
+    )
+
+
 def search_chunks(query: str, user_id: uuid.UUID, limit: int = 5) -> list[dict]:
     # deliberately no score_threshold: real testing showed cosine similarity from
     # this embedding model doesn't cleanly separate relevant from irrelevant

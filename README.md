@@ -18,7 +18,7 @@ Register an account, upload a PDF, and ask questions about it.
 
 1. **Register / log in** — JWT authentication; every user only ever sees their own documents and chats.
 2. **Upload a PDF** — the file is validated, text-extracted, and indexed for semantic search. Scanned PDFs (no embedded text) are automatically detected and routed through OCR.
-3. **Ask questions in chat** — a four-agent pipeline decides how to handle the question, searches your documents, generates an answer grounded in what it found, and fact-checks that answer before showing it to you.
+3. **Ask questions in chat** — a four-agent pipeline decides how to handle the question, searches your documents, generates an answer grounded in what it found, and fact-checks that answer before showing it to you. Chats are named automatically after their opening message.
 4. **See where each answer came from** — every assistant reply carries an explicit source label:
 
    | Label | Meaning |
@@ -82,7 +82,7 @@ This suits the project's scope — a handful of personal documents per user. At 
 | OCR | Tesseract (pytesseract) | Pages rendered at 300 DPI before OCR |
 | File storage | Local disk behind an abstraction | Swappable to S3 without touching business logic |
 | Infra | Docker Compose | Postgres, Qdrant, Adminer |
-| Tests | pytest | 50 tests; LLM calls mocked so the suite never spends API quota |
+| Tests | pytest | 61 tests; LLM calls mocked so the suite never spends API quota |
 | CI | GitHub Actions | Runs the full suite against a real Qdrant service container |
 
 ## API
@@ -94,6 +94,7 @@ This suits the project's scope — a handful of personal documents per user. At 
 | `GET` | `/auth/me` | Current user |
 | `POST` | `/documents/upload` | Upload and index a PDF |
 | `GET` | `/documents` | List your uploaded documents |
+| `DELETE` | `/documents/{id}` | Delete a document — its file, its metadata and its indexed chunks |
 | `POST` | `/chat/sessions` | Start a chat session |
 | `GET` | `/chat/sessions` | List your chat sessions |
 | `POST` | `/chat/sessions/{id}/messages` | Send a message, run the pipeline, get the answer |
@@ -161,7 +162,7 @@ Secrets are never committed — `.env` is recreated directly on the instance.
 pytest tests/ -v
 ```
 
-50 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, and the full graph wiring.
+61 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, document deletion across all three data stores, and the full graph wiring.
 
 Two deliberate testing decisions:
 
@@ -182,5 +183,4 @@ Deliberate boundaries, chosen to keep the project focused:
 
 - **LLM rate limits.** Runs on Groq's free tier: 200K tokens/day and 8K tokens/minute. A document question costs roughly 3,600 tokens, because Generation and the Validator each read the retrieved chunks. Sustained use can exhaust the daily budget, and a question against a large document — where all 20 retrieved chunks come back full — can approach the per-minute ceiling. A paid tier removes both; short of that, the lever is sending the Validator a trimmed chunk set rather than the full one.
 - **Retrieval doesn't scale to large corpora.** The retrieve-generously strategy described above is right for a handful of documents per user, but would need a reranking step at much larger scale.
-- **Documents can't be deleted through the API** yet — uploads are currently add-only.
 - **No HTTPS.** The deployment serves plain HTTP on its EC2 public IP, so credentials travel unencrypted. Fixing it properly means a domain name and a TLS certificate, since certificates aren't issued for bare IP addresses.
