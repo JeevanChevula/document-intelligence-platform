@@ -6,6 +6,7 @@ from api_client import (
     ApiError,
     create_session,
     delete_document,
+    delete_session,
     list_documents,
     list_messages,
     list_sessions,
@@ -24,6 +25,7 @@ def _init_session_state() -> None:
     st.session_state.setdefault("email", None)
     st.session_state.setdefault("current_session_id", None)
     st.session_state.setdefault("pending_delete", None)
+    st.session_state.setdefault("pending_chat_delete", None)
 
 
 def _login_and_register_screen() -> None:
@@ -132,6 +134,31 @@ def _documents_tab(token: str) -> None:
         st.divider()
 
 
+def _delete_chat_button(token: str, session_id: str) -> None:
+    """Delete the open chat, behind the same two-step confirm as documents.
+
+    On success the selection is cleared rather than moved to another chat:
+    silently dropping the user into a different conversation right after they
+    deleted one reads as though the wrong thing was deleted.
+    """
+    if st.session_state.get("pending_chat_delete") == session_id:
+        if st.button("Confirm", key=f"confirm_chat_{session_id}", type="primary", use_container_width=True):
+            try:
+                delete_session(token, session_id)
+                st.session_state["pending_chat_delete"] = None
+                st.session_state["current_session_id"] = None
+                st.rerun()
+            except ApiError as e:
+                st.error(f"Could not delete chat: {e}")
+        if st.button("Cancel", key=f"cancel_chat_{session_id}", use_container_width=True):
+            st.session_state["pending_chat_delete"] = None
+            st.rerun()
+    elif st.button("🗑 Delete", key=f"delete_chat_{session_id}", use_container_width=True,
+                   help="Delete this chat and all its messages"):
+        st.session_state["pending_chat_delete"] = session_id
+        st.rerun()
+
+
 def _chat_tab(token: str) -> None:
     try:
         sessions = list_sessions(token)
@@ -145,7 +172,7 @@ def _chat_tab(token: str) -> None:
     options = list(session_labels.keys())
     current = st.session_state["current_session_id"]
 
-    picker_col, new_col = st.columns([4, 1])
+    picker_col, new_col, delete_col = st.columns([4, 1, 1])
     with picker_col:
         # index=None so opening the tab never drops the user into an old
         # conversation — landing on a stale chat read as "it lost my place"
@@ -168,6 +195,10 @@ def _chat_tab(token: str) -> None:
                 st.rerun()
             except ApiError as e:
                 st.error(f"Could not create chat session: {e}")
+    with delete_col:
+        st.write("")  # line the button up with the selectbox
+        if current in session_labels:
+            _delete_chat_button(token, current)
 
     session_id = st.session_state["current_session_id"]
     if session_id is None:
@@ -204,6 +235,7 @@ def _main_app() -> None:
             st.session_state["email"] = None
             st.session_state["current_session_id"] = None
             st.session_state["pending_delete"] = None
+            st.session_state["pending_chat_delete"] = None
             st.rerun()
 
     documents_tab, chat_tab = st.tabs(["Documents", "Chat"])

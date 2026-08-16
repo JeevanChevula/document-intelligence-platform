@@ -73,6 +73,11 @@ def create_session(token: str, title: str | None) -> dict:
     return response.json()
 
 
+def delete_session(token: str, session_id: str) -> None:
+    response = requests.delete(f"{API_BASE_URL}/chat/sessions/{session_id}", headers=_auth_headers(token))
+    _raise_for_status(response)
+
+
 def list_messages(token: str, session_id: str) -> list[dict]:
     response = requests.get(f"{API_BASE_URL}/chat/sessions/{session_id}/messages", headers=_auth_headers(token))
     _raise_for_status(response)

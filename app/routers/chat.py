@@ -76,6 +76,26 @@ def list_sessions(db: Session = Depends(get_db), current_user: User = Depends(ge
     )
 
 
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a chat and everything said in it.
+
+    Simpler than deleting a document, which spans Qdrant, disk and Postgres: a
+    chat lives only in Postgres, and ChatSession.messages cascades, so removing
+    the session removes its messages in the same transaction.
+
+    Note this deletes the conversation, not the documents it discussed — and
+    conversely, deleting a document never rewrites chats that already quoted it.
+    """
+    session = _get_owned_session(session_id, db, current_user)
+    db.delete(session)
+    db.commit()
+
+
 @router.post("/sessions/{session_id}/messages", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
 def send_message(
     session_id: uuid.UUID,

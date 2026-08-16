@@ -88,7 +88,7 @@ Retrieval deliberately does **not** filter by a similarity-score threshold. Meas
 | OCR | Tesseract (pytesseract) | Pages rendered at 300 DPI before OCR |
 | File storage | Local disk behind an abstraction | Swappable to S3 without touching business logic |
 | Infra | Docker Compose | Postgres, Qdrant, Adminer |
-| Tests | pytest | 70 tests; LLM calls mocked so the suite never spends API quota |
+| Tests | pytest | 75 tests; LLM calls mocked so the suite never spends API quota |
 | CI | GitHub Actions | Runs the full suite against a real Qdrant service container |
 
 ## API
@@ -103,6 +103,7 @@ Retrieval deliberately does **not** filter by a similarity-score threshold. Meas
 | `DELETE` | `/documents/{id}` | Delete a document — its file, its metadata and its indexed chunks |
 | `POST` | `/chat/sessions` | Start a chat session |
 | `GET` | `/chat/sessions` | List your chat sessions |
+| `DELETE` | `/chat/sessions/{id}` | Delete a chat and all its messages |
 | `POST` | `/chat/sessions/{id}/messages` | Send a message, run the pipeline, get the answer |
 | `GET` | `/chat/sessions/{id}/messages` | Full chat history |
 | `GET` | `/health` | Health check |
@@ -168,7 +169,7 @@ Secrets are never committed — `.env` is recreated directly on the instance.
 pytest tests/ -v
 ```
 
-70 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, hybrid search (including that fusion never crosses users), document deletion across all three data stores, and the full graph wiring.
+75 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, hybrid search (including that fusion never crosses users), document deletion across all three data stores, and the full graph wiring.
 
 Two deliberate testing decisions:
 
