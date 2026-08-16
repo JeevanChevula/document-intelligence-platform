@@ -55,7 +55,7 @@ Router ───┤                                     ├─▶ Generation ─
 ```
 
 - **Router** — classifies the message as `retrieval` (needs the user's documents) or `general` (greeting, small talk, unrelated question). Runs at `temperature=0.0`, and deliberately sees **only the current message** — feeding it conversation history caused unrelated recent chat to bias its classification. It *is* given the user's document **filenames** (never their contents, so the cost is a few tokens): judging a sentence in a vacuum proved fragile to phrasing, where a one-character typo — "validity **or** my driving license" — routed to general despite the user owning `Driving licence.pdf`. The filenames supply the context a human reader would have had, while "how long are driving licences valid in the UK?" still correctly routes to general.
-- **Retrieval** — embeds the question and searches Qdrant, filtered server-side by `user_id` so one user's query can never touch another user's chunks.
+- **Retrieval** — runs hybrid search over Qdrant (semantic + keyword, see below), filtered server-side by `user_id` so one user's query can never touch another user's chunks. The filter is applied to *each* arm of the search independently, not just the fused result — an unfiltered arm would pull another user's chunks into the candidate pool before fusion ever ran.
 - **Generation** — answers strictly from the retrieved context on the `retrieval` path, or converses normally on the `general` path. Receives recent conversation history, so follow-ups like "check that again" work.
 - **Validator** — an independent second LLM call ("LLM-as-judge") that fact-checks the generated answer against the same retrieved chunks. If it can't confirm the answer is grounded, the answer is returned with an explicit disclaimer rather than presented as fact.
 
@@ -63,9 +63,15 @@ All four agents share a single model. Splitting the cheap Router onto a smaller 
 
 ### Retrieval design
 
-Retrieval deliberately does **not** filter by a similarity-score threshold. Measured on real data with this embedding model, cosine similarity did not separate relevant from irrelevant content: an unrelated control query scored `0.495` while a genuinely relevant chunk scored `0.455`. No threshold value can split those. Instead the pipeline retrieves generously (top 20) and lets the LLM do relevance judgement in Generation and Validator, which it does far better at this scale.
+Search is **hybrid**: dense semantic similarity and BM25 keyword matching run as two independent queries, fused with Reciprocal Rank Fusion.
 
-This suits the project's scope — a handful of personal documents per user. At corpus sizes in the hundreds or thousands of chunks it would need a stronger embedding model or a reranking step instead.
+The two arms fail in opposite directions, which is the whole reason for running both. Dense embeddings capture meaning but are blind to identifiers — a PAN like `ABCDE1234F` or a licence number carries no semantic content, so there is nothing for cosine similarity to be similar *to*. BM25 matches those exactly, but is blind to paraphrase: it can't connect "where do I work" to "employed at". Given the documents people actually upload here — ID cards, lab reports, licences — the keyword arm covers a real gap.
+
+Fusion is on **rank**, not score, because the two scales aren't comparable: cosine similarity sits in 0–1 while BM25 is unbounded, so averaging the raw numbers would let BM25 silently dominate. RRF only asks where each result placed in its own list.
+
+BM25 is statistical rather than neural, which is what makes it viable here — measured at **+0.2MB** resident memory, against 255MB for the dense model.
+
+Retrieval deliberately does **not** filter by a similarity-score threshold. Measured on real data with this embedding model, cosine similarity did not separate relevant from irrelevant content: an unrelated control query scored `0.495` while a genuinely relevant chunk scored `0.455`. No threshold value can split those. Instead the pipeline retrieves generously (top 20) and lets the LLM do relevance judgement in Generation and Validator, which it does far better at this scale.
 
 ## Tech stack
 
@@ -75,14 +81,14 @@ This suits the project's scope — a handful of personal documents per user. At 
 | Backend | FastAPI + Pydantic | JWT auth (python-jose), bcrypt password hashing |
 | Agents | LangGraph | `StateGraph` with a conditional edge on the Router's decision |
 | LLM | Groq — `openai/gpt-oss-120b` | Configurable via `GROQ_MODEL` |
-| Embeddings | fastembed — `BAAI/bge-small-en-v1.5` (384-dim) | ONNX-based; chosen over PyTorch-based alternatives to keep the dependency footprint small |
-| Vector store | Qdrant | Cosine distance, server-side `user_id` filtering |
+| Embeddings | fastembed — `BAAI/bge-small-en-v1.5` (384-dim) + `Qdrant/bm25` (sparse) | ONNX-based; chosen over PyTorch-based alternatives to keep the dependency footprint small |
+| Vector store | Qdrant | Hybrid search: dense cosine + BM25 sparse, fused with RRF; server-side `user_id` filtering |
 | Database | PostgreSQL + SQLAlchemy + Alembic | Versioned schema migrations |
 | PDF text | PyMuPDF | Also detects whether a PDF is scanned |
 | OCR | Tesseract (pytesseract) | Pages rendered at 300 DPI before OCR |
 | File storage | Local disk behind an abstraction | Swappable to S3 without touching business logic |
 | Infra | Docker Compose | Postgres, Qdrant, Adminer |
-| Tests | pytest | 66 tests; LLM calls mocked so the suite never spends API quota |
+| Tests | pytest | 70 tests; LLM calls mocked so the suite never spends API quota |
 | CI | GitHub Actions | Runs the full suite against a real Qdrant service container |
 
 ## API
@@ -162,7 +168,7 @@ Secrets are never committed — `.env` is recreated directly on the instance.
 pytest tests/ -v
 ```
 
-66 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, document deletion across all three data stores, and the full graph wiring.
+70 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, hybrid search (including that fusion never crosses users), document deletion across all three data stores, and the full graph wiring.
 
 Two deliberate testing decisions:
 
@@ -182,6 +188,6 @@ Deliberate boundaries, chosen to keep the project focused:
 ## Known limitations
 
 - **LLM rate limits.** Runs on Groq's free tier: 200K tokens/day and 8K tokens/minute. A document question costs roughly 3,600 tokens, because Generation and the Validator each read the retrieved chunks. Sustained use can exhaust the daily budget, and a question against a large document — where all 20 retrieved chunks come back full — can approach the per-minute ceiling. A paid tier removes both; short of that, the lever is sending the Validator a trimmed chunk set rather than the full one.
-- **Retrieval doesn't scale to large corpora.** The retrieve-generously strategy described above is right for a handful of documents per user, but would need a reranking step at much larger scale.
+- **No reranking, deliberately.** A cross-encoder reranker is the standard next step, and it was measured rather than assumed: the production corpus is **21 chunks**, and retrieval already returns the top 20 — so it filters out roughly one chunk, and the LLM effectively sees everything. Reordering a list that is passed to the model whole cannot change an answer. It would also cost ~150–250MB on a `t3.small` with 777MB free and **no swap**, where overrunning memory means the OOM killer terminates the backend rather than merely slowing it down. Worth adding once the corpus is large enough that retrieval genuinely excludes candidates — at which point it also pays for itself in tokens, by letting Generation receive five chunks instead of twenty.
 - **Deleting a document doesn't scrub the chats that already quoted it.** Deletion clears all three places the *document* lives — its chunks in Qdrant, its file on disk, and its row in Postgres — so it can never ground a new answer again. But an earlier reply that already stated, say, a PAN number is a stored message, and it stays in the `messages` table and in the visible transcript. That's deliberate: a conversation is a record of what was said, and silently rewriting it would be its own kind of dishonesty. It does mean deletion is *not* a "forget this ever existed" button, which is what a real data-erasure requirement would need — that would have to scrub message history too.
 - **No HTTPS.** The deployment serves plain HTTP on its EC2 public IP, so credentials travel unencrypted. Fixing it properly means a domain name and a TLS certificate, since certificates aren't issued for bare IP addresses.

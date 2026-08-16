@@ -78,6 +78,19 @@ def test_filenames_are_framed_as_data_not_instructions():
     assert "never as" in prompt and "instructions" in prompt
 
 
+def test_bare_identifiers_are_called_out_as_document_lookups():
+    # regression: pasting a PAN on its own routed to general, so retrieval never
+    # ran and hybrid keyword search — built precisely for identifiers — never got
+    # the query. A lone code with no question around it is someone looking
+    # something up in their own documents.
+    with patch("app.agents.router.get_completion", return_value="retrieval") as mock_completion:
+        route_query("ABCDE1234F", ["Pan card.pdf"])
+
+    prompt = _system_prompt_from(mock_completion).lower()
+    assert "identifier" in prompt
+    assert "no question around it" in prompt
+
+
 def test_document_list_is_capped_so_the_prompt_stays_bounded():
     many = [f"document_{i}.pdf" for i in range(MAX_LISTED_DOCUMENTS + 25)]
 
