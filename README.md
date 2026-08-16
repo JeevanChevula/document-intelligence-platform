@@ -88,8 +88,8 @@ Retrieval deliberately does **not** filter by a similarity-score threshold. Meas
 | OCR | Tesseract (pytesseract) | Pages rendered at 300 DPI before OCR |
 | File storage | Local disk behind an abstraction | Swappable to S3 without touching business logic |
 | Infra | Docker Compose | Postgres, Qdrant, Adminer |
-| Tests | pytest | 75 tests; LLM calls mocked so the suite never spends API quota |
-| CI | GitHub Actions | Runs the full suite against a real Qdrant service container |
+| Tests | pytest | 81 tests; LLM calls mocked so the suite never spends API quota |
+| CI | GitHub Actions | Runs the full suite against real Qdrant and PostgreSQL service containers |
 
 ## API
 
@@ -169,7 +169,7 @@ Secrets are never committed — `.env` is recreated directly on the instance.
 pytest tests/ -v
 ```
 
-75 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, hybrid search (including that fusion never crosses users), document deletion across all three data stores, and the full graph wiring.
+81 tests covering chunking, embeddings, PDF extraction, OCR, storage, JWT/password security, PDF validation, all four agents, hybrid search (including that fusion never crosses users), document deletion across all three data stores, chat deletion and its message cascade, and the full graph wiring.
 
 Two deliberate testing decisions:
 
@@ -188,7 +188,7 @@ Deliberate boundaries, chosen to keep the project focused:
 
 ## Known limitations
 
-- **LLM rate limits.** Runs on Groq's free tier: 200K tokens/day and 8K tokens/minute. A document question costs roughly 3,600 tokens, because Generation and the Validator each read the retrieved chunks. Sustained use can exhaust the daily budget, and a question against a large document — where all 20 retrieved chunks come back full — can approach the per-minute ceiling. A paid tier removes both; short of that, the lever is sending the Validator a trimmed chunk set rather than the full one.
+- **LLM rate limits.** Runs on Groq's free tier: 200K tokens/day and 8K tokens/minute. A document question costs roughly 3,600 tokens, because Generation and the Validator each read the retrieved chunks. Sustained use can exhaust the daily budget, and a question against a large document — where all 20 retrieved chunks come back full — can approach the per-minute ceiling. A paid tier removes both; short of that, the lever is sending the Validator a trimmed chunk set rather than the full one. The two limits are handled differently in code: a per-minute 429 is retried with backoff (honouring the server's `Retry-After`, capped so nobody waits on a hung page), while a per-day 429 fails immediately with an explicit "today's budget is used up" message — retrying it would only delay the same failure.
 - **No reranking, deliberately.** A cross-encoder reranker is the standard next step, and it was measured rather than assumed: the production corpus is **21 chunks**, and retrieval already returns the top 20 — so it filters out roughly one chunk, and the LLM effectively sees everything. Reordering a list that is passed to the model whole cannot change an answer. It would also cost ~150–250MB on a `t3.small` with 777MB free and **no swap**, where overrunning memory means the OOM killer terminates the backend rather than merely slowing it down. Worth adding once the corpus is large enough that retrieval genuinely excludes candidates — at which point it also pays for itself in tokens, by letting Generation receive five chunks instead of twenty.
 - **Deleting a document doesn't scrub the chats that already quoted it.** Deletion clears all three places the *document* lives — its chunks in Qdrant, its file on disk, and its row in Postgres — so it can never ground a new answer again. But an earlier reply that already stated, say, a PAN number is a stored message, and it stays in the `messages` table and in the visible transcript. That's deliberate: a conversation is a record of what was said, and silently rewriting it would be its own kind of dishonesty. It does mean deletion is *not* a "forget this ever existed" button, which is what a real data-erasure requirement would need — that would have to scrub message history too.
 - **No HTTPS.** The deployment serves plain HTTP on its EC2 public IP, so credentials travel unencrypted. Fixing it properly means a domain name and a TLS certificate, since certificates aren't issued for bare IP addresses.

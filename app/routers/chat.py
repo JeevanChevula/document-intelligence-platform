@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.graph import run_agent_pipeline
+from app.llm import DailyQuotaExceeded
 from app.models import ChatSession, DocumentMetadata, Message, User
 from app.schemas import ChatSessionCreate, ChatSessionOut, MessageCreate, MessageOut
 
@@ -137,6 +138,16 @@ def send_message(
         # only meaningful when there were chunks to validate against; stays NULL
         # for general chat and for document questions that retrieved nothing
         is_verified = result["is_valid"] if source == "documents" else None
+    except DailyQuotaExceeded:
+        # a distinct message because the advice is different: "try again" is
+        # useless here, and a vague error would have the user retrying all day
+        logger.warning("Daily LLM quota exhausted, refusing session %s", session.id)
+        answer = (
+            "This demo runs on a free LLM tier, and today's token budget is used up. "
+            "It resets daily — please try again tomorrow."
+        )
+        source = "error"
+        is_verified = None
     except Exception:
         # never leave the user's question without a reply, even if the pipeline
         # itself failed (Groq outage, rate limit, network error, etc.) — but do
